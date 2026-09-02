@@ -29,6 +29,10 @@ Each incident follows the same support workflow:
 
 The reusable structure is [`incidents/INCIDENT-TEMPLATE.md`](incidents/INCIDENT-TEMPLATE.md).
 
+## Hiring-manager review path
+
+Start with the [hiring-manager review guide](docs/HIRING-MANAGER-GUIDE.md), then inspect the [technical architecture](docs/ARCHITECTURE.md), [redacted request/response examples](evidence/REDACTED-REQUEST-RESPONSE-EXAMPLES.md), and the [high-volume queue exercise](queue/README.md). The queue includes initial triage, customer updates, escalation routing, changing priorities after new evidence, and a polished take-home response. The [failed-hypothesis example](docs/FAILED-HYPOTHESIS.md) shows how the investigation changes when evidence disproves the initial idea.
+
 ## Incident portfolio
 
 | Incident | Support scenario | Evidence-backed result |
@@ -82,6 +86,8 @@ supabase-support-lab/
 ├── SECURITY.md
 ├── sql/                         Reproduction and remediation SQL
 ├── incidents/                   Incident records and reusable template
+├── docs/                        Hiring-manager guide and architecture
+├── queue/                       High-volume triage and take-home exercise
 ├── runbooks/                    Layer-specific troubleshooting checklists
 ├── tools/                       Temporary local validation client
 └── evidence/                    Validation notes and screenshots
