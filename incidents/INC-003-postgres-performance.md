@@ -1,39 +1,61 @@
-# INC-003 — PostgreSQL slow lookup / missing index
+# INC-003 - PostgreSQL selective lookup / missing index
 
-## Symptom
-A lookup for one support ticket by `customer_email` scanned almost the entire table.
+## Simulated customer ticket
 
-## Evidence before fix
-`EXPLAIN (ANALYZE, BUFFERS)` showed:
-- Sequential scan on `support_tickets`
+> Looking up a ticket by customer email becomes slow after the table grows.
+> Other application functions remain available.
+
+## Impact and scope
+
+A repeated selective read path is slower than expected. This is not automatically
+an outage, and a sequential scan is not automatically incorrect.
+
+## Original evidence
+
+The original `EXPLAIN (ANALYZE, BUFFERS)` capture showed:
+
+- sequential scan on `support_tickets`
 - 50,003 rows removed by filter
 - 703 shared buffer hits
 
-## Investigation
-The query filtered on `customer_email`, but no index supported that predicate.
+After adding a B-tree index on `customer_email`, the captured plan used the index
+condition, shared buffer hits fell to 4 and one lab execution took 0.128 ms.
+That timing is one captured run, not a universal performance guarantee.
 
-## Root cause
-Missing index on `public.support_tickets(customer_email)`.
+## Investigation and decision
+
+The equality predicate returned one row from about 50,004, making it selective.
+The lookup represented a repeated access pattern and no suitable index existed.
+Those facts justified testing a B-tree index.
 
 ## Fix
 
-```sql
-create index idx_support_tickets_customer_email
-on public.support_tickets(customer_email);
+See `sql/performance-index.sql`. The file now drops the lab index first so the
+before plan can be reproduced, creates the index, analyzes the table and captures
+the same query again.
 
-analyze public.support_tickets;
-```
+## Trade-offs
 
-## Recovery validation
-The same query used the index path:
-- `Index Cond` on `customer_email`
-- shared buffer hits reduced from 703 to 4
-- captured execution time: 0.128 ms
-- full-table filtering was eliminated
+- Indexes consume storage.
+- Inserts and updates must maintain the index.
+- A sequential scan may remain correct for a small table or low-selectivity query.
+- `EXPLAIN ANALYZE` executes the statement and must be used cautiously in
+  production, especially for writes or expensive queries.
 
-## Evidence
-- [Before: sequential scan](../evidence/screenshots/INC-003-before-seq-scan.png)
-- [After: indexed lookup](../evidence/screenshots/INC-003-after-index.png)
+## Validation required for Version 2
 
-## Learning
-Use `EXPLAIN (ANALYZE, BUFFERS)` to confirm the access path before and after an index change rather than assuming the index improved the query.
+- save the complete before plan as text
+- save the complete after plan as text
+- repeat executions and record whether results remain consistent
+- confirm the returned row is unchanged
+- document table size and selectivity at test time
+
+Clean Version 2 plan output is pending hosted execution.
+
+## Customer-facing resolution
+
+The query was filtering a large table by a highly selective email value without
+an index that matched the predicate. We added a B-tree index for that repeated
+lookup and compared the same plan before and after. The updated plan avoided the
+full-table filtering observed in the lab. We would continue monitoring the real
+workload because the index also adds storage and write-maintenance cost.
