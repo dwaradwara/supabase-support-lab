@@ -1,61 +1,112 @@
-# Supabase Support Lab
+# Supabase Support Lab - Version 2
 
-Hands-on support engineering lab built around a hosted Supabase project. The goal was to reproduce realistic support incidents, collect evidence, diagnose root causes, apply fixes, and validate recovery.
+Support-engineering lab built around a disposable hosted Supabase project. The
+lab reproduces customer-style failures, records evidence, tests competing
+hypotheses, applies the smallest safe correction and validates both allowed and
+denied behavior.
 
-## What this lab covers
+Version 2 is an active hardening branch. SQL and documentation marked **pending
+validation** have been authored but must be executed against the hosted lab
+before successful output is claimed.
 
-- Supabase Data API / PostgREST
-- PostgreSQL troubleshooting and query performance
-- Row Level Security (RLS)
-- Supabase Auth and JWT-based access
-- Supabase Storage authorization
-- Unified Logs / API Gateway correlation
-- External PostgreSQL connectivity with `psql`
-- Incident documentation and recovery validation
+## What this lab demonstrates
 
-## Incident summary
+- Supabase Data API / PostgREST troubleshooting
+- Auth request parsing, JWT context and owner-scoped RLS
+- Storage authorization with bucket and user-folder restrictions
+- PostgreSQL plans, selectivity, buffers and index trade-offs
+- Real row-lock contention with blocker/waiter diagnosis
+- External PostgreSQL connectivity and pooling fundamentals
+- Customer-facing explanations and internal investigation notes
+- Safe validation, negative tests and asynchronous escalation structure
 
-| Incident | Symptom | Root cause | Recovery |
-|---|---|---|---|
-| INC-001 | Data API returned no rows although rows existed | RLS enabled with no matching SELECT policy | Added policy and verified rows returned |
-| INC-002 | Login/API authorization failures | Malformed JSON, bad API key input, then invalid credentials | Corrected request, authenticated successfully, validated JWT + authenticated RLS |
-| INC-003 | Single-row lookup scanned ~50k rows | Missing index on `customer_email` | Added B-tree index and verified indexed execution plan |
-| INC-004 | Competing lock acquisition | Resource already held by another session | Demonstrated contention and recovery using PostgreSQL advisory locks |
-| INC-005 | REST request returned HTTP 404 / PGRST205 | Misspelled table/resource in endpoint | Correlated API Gateway log and corrected endpoint to HTTP 200 |
-| INC-006 | Storage upload denied | No matching `storage.objects` INSERT policy | Added authenticated bucket-scoped policy and verified HTTP 200 upload |
-| INC-007 | External PostgreSQL login failed | Invalid database password | Retried with correct credentials and verified live DB access via Session Pooler |
+## Support workflow
 
-## PostgreSQL performance evidence
+Each flagship incident follows this sequence:
 
-Before indexing, the lookup on `customer_email` used a sequential scan and removed 50,003 rows by filter. After adding an index, PostgreSQL used the index path, shared buffer hits dropped from 703 to 4, and the captured execution time was 0.128 ms.
+```text
+Customer impact
+-> exact evidence
+-> hypotheses and tests
+-> root cause
+-> smallest safe change
+-> positive and negative validation
+-> customer explanation
+-> prevention / escalation
+```
 
-See:
-- [`incidents/INC-003-postgres-performance.md`](incidents/INC-003-postgres-performance.md)
-- [`evidence/screenshots/INC-003-before-seq-scan.png`](evidence/screenshots/INC-003-before-seq-scan.png)
-- [`evidence/screenshots/INC-003-after-index.png`](evidence/screenshots/INC-003-after-index.png)
+## Incident status
+
+| Incident | Scenario | Version 2 status |
+|---|---|---|
+| [INC-001](incidents/INC-001-rls-data-api.md) | SQL Editor has rows; client returns `[]` | Owner-scoped rewrite complete; hosted validation pending |
+| [INC-002](incidents/INC-002-auth-jwt-rls.md) | Auth/JWT succeeds but data access differs | Secure policy rewrite complete; hosted Auth validation pending |
+| [INC-003](incidents/INC-003-postgres-performance.md) | Selective lookup scans about 50k rows | Reproducible SQL complete; clean plans pending |
+| [INC-004](incidents/INC-004-lock-contention.md) | Update hangs behind an open transaction | Real blocker diagnostics complete; hosted evidence pending |
+| [INC-005](incidents/INC-005-api-404-postgrest.md) | Data API returns PGRST205 | Foundational scenario retained; clean evidence pending |
+| [INC-006](incidents/INC-006-storage-rls.md) | Private-bucket upload denied | User-folder policy complete; hosted allow/deny validation pending |
+| [INC-007](incidents/INC-007-postgres-connection.md) | External PostgreSQL authentication fails | Foundational scenario retained; advanced pooling replacement planned |
+
+## Security corrections in Version 2
+
+The original learning version used `to authenticated using (true)` to prove that
+an authenticated role could read through RLS. That policy allowed every signed-in
+user to see every ticket and is not retained.
+
+Version 2 adds `owner_id` and validates that:
+
+- User A sees only User A rows.
+- User B sees only User B rows.
+- anonymous and unrelated users see no rows.
+- Storage uploads are restricted to the authenticated user's folder.
+- grants and policies are reviewed separately.
+
+## Reproducing the lab
+
+Read [SETUP.md](SETUP.md). Use only a disposable project. The reset script is
+destructive and is not appropriate for production or shared databases.
+
+Recommended order:
+
+1. `sql/00-reset.sql`
+2. `sql/schema.sql`
+3. `sql/seed.sql`
+4. `sql/rls-policies.sql`
+5. `sql/rls-validation.sql`
+6. the selected incident reproduction file
+
+## Evidence policy
+
+The original screenshots were removed from the Version 2 branch because they
+included unrelated browser and desktop context. New evidence must be tightly
+cropped, sanitized and generated from actual execution. See
+[evidence/PENDING.md](evidence/PENDING.md).
+
+No password, full JWT, refresh token, secret/service-role key or real customer
+data belongs in this repository.
 
 ## Repository structure
 
 ```text
 supabase-support-lab/
-├── README.md
-├── SECURITY.md
-├── sql/
-├── incidents/
-├── runbooks/
-└── evidence/
-    └── screenshots/
+|-- README.md
+|-- SETUP.md
+|-- SECURITY.md
+|-- sql/
+|-- incidents/
+|-- runbooks/
+|-- templates/
+`-- evidence/
 ```
 
-## Security note
+## Current limitations
 
-No passwords, JWTs, service-role keys, database passwords, or other secrets should be committed to this repository. Screenshots included here were selected to avoid exposing credentials.
+- This is a controlled learning lab, not Supabase internal production
+  infrastructure.
+- It does not reproduce real customer scale, private support tooling or internal
+  engineering access.
+- Synthetic JWT claims are used for deterministic SQL-only RLS tests.
+- Version 2 evidence remains pending until the hosted scenarios are rerun.
 
-## Environment
-
-- Supabase hosted project
-- PostgreSQL
-- PowerShell / curl
-- `psql`
-- Supabase SQL Editor
-- Supabase Unified Logs
+These limitations are stated explicitly so the project demonstrates method and
+judgment without claiming production experience it does not provide.

@@ -1,44 +1,69 @@
-# INC-002 — Authentication, JWT and authenticated RLS
+# INC-002 - Authentication, JWT and owner-scoped RLS
 
-## Symptom
-Authentication requests failed at different stages and authenticated access to the Data API had to be validated.
+## Simulated customer ticket
 
-## Evidence
-Three separate failures were reproduced:
-1. Malformed request body: Auth logs showed JSON parsing failure.
-2. Invalid API key: request was rejected before login validation.
-3. Valid request with wrong password: `invalid_credentials`.
+> Login fails for some attempts. When login succeeds, the Data API result does
+> not match what the user expects to see.
 
-## Investigation
-Each failure was isolated by moving one layer at a time:
-- request serialization
-- project API key
-- user credentials
-- JWT issuance
-- authenticated RLS behavior
+## Impact and scope
 
-## Root cause
-The failures were caused by different request-layer and credential-layer issues rather than one platform outage.
+This scenario crosses four distinct layers: request serialization, project-key
+validation, user authentication/JWT issuance and database authorization.
 
-## Fix
-- Generated JSON using PowerShell object serialization.
-- Corrected the publishable key variable.
-- Used the correct test-user credentials.
-- Replaced the temporary anonymous SELECT policy with an authenticated-only policy.
+## Initial response
+
+I would capture the exact Auth response, timestamp, project URL and sanitized
+request shape. I would not ask for the user's password or full JWT. After login
+succeeds, I would validate the token claims and test the Data API separately so
+an authentication failure is not confused with an RLS authorization outcome.
+
+## Evidence and isolation
+
+1. Malformed request body: Auth logs showed a JSON parsing failure.
+2. Invalid project key input: request failed before credential validation.
+3. Correct request with the wrong password: `invalid_credentials`.
+4. Correct request and credentials: access token issued with 3600-second expiry.
+5. Authenticated Data API request: authorization behavior controlled by RLS.
+
+## Root causes
+
+The failures came from different layers rather than one Supabase outage. The
+original lab then used `to authenticated using (true)`, which proved the role
+transition but allowed every authenticated user to read every ticket. Version 2
+removes that unsafe final state.
+
+## Secure final policy
 
 ```sql
-create policy "authenticated users can read tickets"
+create policy "users read their own tickets"
 on public.support_tickets
 for select
 to authenticated
-using (true);
+using ((select auth.uid()) = owner_id);
 ```
 
-## Recovery validation
-- Login returned a valid access token.
-- Token expiry reported 3600 seconds.
-- Authenticated request returned the four tickets.
-- The same request without the JWT returned zero rows.
+## Validation requirements
+
+- Missing/expired JWT does not expose rows.
+- User A sees only User A tickets.
+- User B sees only User B tickets.
+- User A cannot read User B tickets.
+- Full JWTs, API secrets and passwords are absent from evidence.
+
+The repository contains a synthetic-claim SQL validation in
+`sql/rls-validation.sql`. A real Auth API validation must also be rerun with the
+hosted project's test users before the incident is marked fully validated.
+
+## Customer-facing resolution
+
+The failures occurred at separate stages. We first corrected the JSON and
+project-key inputs, then validated the user credentials and JWT. After
+authentication succeeded, we corrected the database policy so the signed-in
+user can see only rows owned by that user. This avoids the unsafe alternative of
+granting all authenticated users access to all customer tickets.
 
 ## Learning
-Treat Supabase Auth, API-key validation, JWT issuance and PostgreSQL RLS as separate layers during troubleshooting.
+
+Treat Auth request parsing, project-key validation, credential verification,
+JWT issuance, table grants and RLS as distinct checkpoints. State which layer
+the evidence supports instead of labeling every failure as an Auth problem.

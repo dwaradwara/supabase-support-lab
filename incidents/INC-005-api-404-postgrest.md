@@ -1,34 +1,51 @@
-# INC-005 — Data API 404 / PostgREST resource error
+# INC-005 - Data API 404 / PostgREST resource error
 
-## Symptom
-A REST request returned HTTP 404.
+## Simulated customer ticket
 
-## Evidence
-The failing request used a misspelled resource:
+> A Data API request that should return support tickets now returns HTTP 404.
 
-`/rest/v1/support_ticketssss?select=*`
+## Original evidence
 
-The response contained:
-- HTTP 404
-- PostgREST error `PGRST205`
-- a hint suggesting `public.support_tickets`
+The foundational reproduction used a misspelled resource path:
 
-The same request was visible in Supabase Unified Logs → API Gateway as a 404 GET.
+```text
+/rest/v1/support_ticketssss?select=*
+```
+
+The response contained HTTP 404, PostgREST code `PGRST205` and a hint pointing
+to `public.support_tickets`. The matching GET was visible in Unified Logs.
 
 ## Root cause
-The endpoint referenced a table/resource that did not exist in the PostgREST schema cache.
 
-## Fix
-Corrected the endpoint to:
+The request referred to a resource PostgREST could not find in its schema cache.
+In this foundational reproduction, the immediate cause was the misspelled table
+name rather than platform availability.
 
-`/rest/v1/support_tickets?select=*`
+## Fix and validation
 
-## Recovery validation
-The corrected request returned HTTP 200. Because anonymous SELECT access was intentionally blocked by RLS, a successful anonymous response could still contain an empty array.
+The path was corrected to:
 
-## Evidence
-- [404 response](../evidence/screenshots/INC-005-pgrst205-404.png)
-- [API Gateway correlation](../evidence/screenshots/INC-005-api-gateway-404.png)
+```text
+/rest/v1/support_tickets?select=*
+```
 
-## Learning
-An HTTP 404 from Supabase Data API does not automatically mean the platform is down. Read the PostgREST code/message and correlate it with API Gateway logs.
+The request returned HTTP 200. An anonymous request could still contain `[]`
+because RLS visibility is separate from resource resolution.
+
+## Support reasoning
+
+A 404 from the Data API is not sufficient evidence that Supabase is down. Read
+the PostgREST code, message and hint; verify the project, exposed schema and
+resource name; then correlate the exact timestamp/request in Unified Logs.
+
+## Version 2 evidence
+
+The original screenshots were removed because they contained unrelated browser
+and desktop context. A clean sanitized request/response and matching log event
+must be recaptured before this incident is marked validated in Version 2.
+
+## Planned advanced extension
+
+The typo scenario remains as a foundational case. A later advanced incident will
+cover a resource that exists but is unavailable because of schema exposure,
+migration or schema-cache behavior.
