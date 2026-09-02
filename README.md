@@ -1,38 +1,78 @@
 # Supabase Support Lab
 
-Hands-on support engineering lab built around a hosted Supabase project. The goal was to reproduce realistic support incidents, collect evidence, diagnose root causes, apply fixes, and validate recovery.
+A hands-on, self-directed Support Engineering environment built in a hosted Supabase project to practice customer-impact triage, PostgreSQL diagnosis, Supabase product troubleshooting, escalation decisions, recovery validation, and incident documentation.
 
-## What this lab covers
+> **Important:** This is simulated lab work, not paid production Supabase support experience and not a collection of real customer incidents. The repository deliberately separates observed lab evidence, assumptions, and production recommendations.
 
-- Supabase Data API / PostgREST
-- PostgreSQL troubleshooting and query performance
-- Row Level Security (RLS)
-- Supabase Auth and JWT-based access
-- Supabase Storage authorization
-- Unified Logs / API Gateway correlation
-- External PostgreSQL connectivity with `psql`
-- Incident documentation and recovery validation
+## What this demonstrates
 
-## Incident summary
+- Investigating the customer symptom before assuming the root cause
+- Separating request, authentication, authorization, database, Storage, and connectivity layers
+- Prioritizing by customer impact, scope, urgency, and safety
+- Reproducing failures and collecting evidence with SQL, HTTP requests, logs, and `psql`
+- Applying the smallest safe fix and validating the original failing path
+- Writing customer updates, internal escalations, and handoff notes
+- Explaining security and operational trade-offs instead of weakening controls blindly
 
-| Incident | Symptom | Root cause | Recovery |
-|---|---|---|---|
-| INC-001 | Data API returned no rows although rows existed | RLS enabled with no matching SELECT policy | Added policy and verified rows returned |
-| INC-002 | Login/API authorization failures | Malformed JSON, bad API key input, then invalid credentials | Corrected request, authenticated successfully, validated JWT + authenticated RLS |
-| INC-003 | Single-row lookup scanned ~50k rows | Missing index on `customer_email` | Added B-tree index and verified indexed execution plan |
-| INC-004 | Competing lock acquisition | Resource already held by another session | Demonstrated contention and recovery using PostgreSQL advisory locks |
-| INC-005 | REST request returned HTTP 404 / PGRST205 | Misspelled table/resource in endpoint | Correlated API Gateway log and corrected endpoint to HTTP 200 |
-| INC-006 | Storage upload denied | No matching `storage.objects` INSERT policy | Added authenticated bucket-scoped policy and verified HTTP 200 upload |
-| INC-007 | External PostgreSQL login failed | Invalid database password | Retried with correct credentials and verified live DB access via Session Pooler |
+## Support investigation method
 
-## PostgreSQL performance evidence
+Each incident follows the same support workflow:
 
-Before indexing, the lookup on `customer_email` used a sequential scan and removed 50,003 rows by filter. After adding an index, PostgreSQL used the index path, shared buffer hits dropped from 703 to 4, and the captured execution time was 0.128 ms.
+1. Confirm the customer symptom and impact.
+2. State what is known, unknown, and assumed.
+3. Assign provisional severity and priority.
+4. Reproduce the failure with one hypothesis at a time.
+5. Capture evidence and identify the actual failing layer.
+6. Apply the smallest safe remediation.
+7. Re-run the original test and validate scope and security.
+8. Communicate the result and document prevention or escalation.
 
-See:
-- [`incidents/INC-003-postgres-performance.md`](incidents/INC-003-postgres-performance.md)
-- [`evidence/screenshots/INC-003-before-seq-scan.png`](evidence/screenshots/INC-003-before-seq-scan.png)
-- [`evidence/screenshots/INC-003-after-index.png`](evidence/screenshots/INC-003-after-index.png)
+The reusable structure is [`incidents/INCIDENT-TEMPLATE.md`](incidents/INCIDENT-TEMPLATE.md).
+
+## Incident portfolio
+
+| Incident | Support scenario | Evidence-backed result |
+|---|---|---|
+| [INC-001](incidents/INC-001-rls-data-api.md) | Data API returned no rows although PostgreSQL contained rows | RLS and request-role mismatch identified; lab recovery returned the expected rows |
+| [INC-002](incidents/INC-002-auth-jwt-rls.md) | Login and protected Data API access failed at different layers | JSON, key, credentials, JWT, and RLS layers isolated separately |
+| [INC-003](incidents/INC-003-postgres-performance.md) | Lookup scanned almost the entire table | B-tree index changed the plan; buffer hits fell from 703 to 4 |
+| [INC-004](incidents/INC-004-lock-contention.md) | Competing sessions could not acquire a logical lock | Advisory-lock contention reproduced and recovery validated |
+| [INC-005](incidents/INC-005-api-404-postgrest.md) | REST request returned HTTP 404 / `PGRST205` | API Gateway correlation identified a misspelled resource; corrected request returned HTTP 200 |
+| [INC-006](incidents/INC-006-storage-rls.md) | Upload to a private Storage bucket was denied | Anonymous upload returned 403; authenticated end-user upload succeeded |
+| [INC-007](incidents/INC-007-postgres-connection.md) | External `psql` connection failed authentication | Same Session Pooler target succeeded with corrected credentials and TLS validation |
+
+## Strongest evidence
+
+### RLS and authorization boundaries
+
+INC-001 and INC-002 show why an empty Data API response does not automatically mean deleted data. The investigation compares database visibility with the effective request role and distinguishes authentication from authorization.
+
+### PostgreSQL performance
+
+In INC-003, `EXPLAIN (ANALYZE, BUFFERS)` showed a sequential scan, 50,003 rows removed by the filter, and 703 shared buffer hits. After the targeted index, PostgreSQL used an index condition, shared buffer hits fell to 4, and the captured execution time was 0.128 ms.
+
+- [Before: sequential scan](evidence/screenshots/INC-003-before-seq-scan.png)
+- [After: indexed lookup](evidence/screenshots/INC-003-after-index.png)
+
+The before execution time and production customer latency were not captured, so this repository does not claim a specific end-user latency reduction.
+
+### Storage authorization
+
+INC-006 has current hosted-project client evidence:
+
+- Unauthenticated upload: HTTP 403 with `new row violates row-level security policy`.
+- Authenticated end-user upload: succeeded through the `authenticated` policy.
+- Dashboard upload: also succeeded, but is treated separately because dashboard access may be privileged.
+
+See the [validation record](evidence/INC-006-validation-2026-09-02.md). No passwords, keys, or JWTs are stored.
+
+## Runbooks
+
+- [Data API troubleshooting](runbooks/api-troubleshooting.md)
+- [Auth troubleshooting](runbooks/auth-troubleshooting.md)
+- [PostgreSQL connectivity](runbooks/postgres-connectivity.md)
+- [PostgreSQL performance](runbooks/postgres-performance.md)
+- [Storage access](runbooks/storage-access.md)
 
 ## Repository structure
 
@@ -40,22 +80,25 @@ See:
 supabase-support-lab/
 ├── README.md
 ├── SECURITY.md
-├── sql/
-├── incidents/
-├── runbooks/
-└── evidence/
-    └── screenshots/
+├── sql/                         Reproduction and remediation SQL
+├── incidents/                   Incident records and reusable template
+├── runbooks/                    Layer-specific troubleshooting checklists
+├── tools/                       Temporary local validation client
+└── evidence/                    Validation notes and screenshots
 ```
-
-## Security note
-
-No passwords, JWTs, service-role keys, database passwords, or other secrets should be committed to this repository. Screenshots included here were selected to avoid exposing credentials.
 
 ## Environment
 
 - Supabase hosted project
 - PostgreSQL
-- PowerShell / curl
-- `psql`
+- PowerShell and `curl`
+- PostgreSQL `psql`
 - Supabase SQL Editor
-- Supabase Unified Logs
+- Supabase Unified Logs / API Gateway logs
+- Temporary local browser client for the authenticated Storage test
+
+## Security and honesty boundary
+
+No passwords, user credentials, JWT access or refresh tokens, secret/service-role keys, database passwords, or credential-bearing connection strings belong in this repository. See [`SECURITY.md`](SECURITY.md).
+
+The lab supports a claim of deliberate technical preparation and evidence-based troubleshooting. It does not support a claim of years of production Supabase support experience, real customer ticket ownership, SLA performance, or production incident management.

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>INC-006 Storage Policy Test</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 760px; margin: 2rem auto; padding: 0 1rem; line-height: 1.45; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    input { box-sizing: border-box; display: block; width: 100%; margin-top: .35rem; padding: .6rem; }
+    button { margin: 1rem .5rem 0 0; padding: .65rem .9rem; cursor: pointer; }
+    #status { white-space: pre-wrap; border: 1px solid #888; padding: 1rem; margin-top: 1.25rem; min-height: 4rem; }
+    .warning { border-left: .35rem solid #d88900; padding-left: .75rem; }
+  </style>
+</head>
+<body>
+  <h1>INC-006 — Storage policy test</h1>
+  <p class="warning"><strong>Temporary local test.</strong> Use only a harmless file. Credentials stay in this page memory and are sent directly to Supabase Auth. They are not saved or sent to Codex.</p>
+
+  <label>
+    Project URL
+    <input id="projectUrl" type="url" value="https://vadwgftdahcqvpqqcmif.supabase.co" autocomplete="off">
+  </label>
+  <label>
+    Publishable key
+    <input id="publishableKey" type="password" autocomplete="off">
+  </label>
+  <label>
+    Existing Auth test-user email
+    <input id="email" type="email" autocomplete="username">
+  </label>
+  <label>
+    Existing Auth test-user password
+    <input id="password" type="password" autocomplete="current-password">
+  </label>
+  <label>
+    Harmless file to upload
+    <input id="file" type="file">
+  </label>
+
+  <button id="signIn">Sign in test user</button>
+  <button id="anonymousUpload">Test unauthenticated upload</button>
+  <button id="authenticatedUpload">Test authenticated upload</button>
+  <button id="signOut">Sign out</button>
+
+  <div id="status" role="status">Enter the publishable key and choose the harmless validation file. Nothing runs automatically.</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const BUCKET = "support-evidence";
+    const statusBox = document.getElementById("status");
+
+    function status(message) {
+      statusBox.textContent = message;
+    }
+
+    function client() {
+      const url = document.getElementById("projectUrl").value.trim();
+      const key = document.getElementById("publishableKey").value.trim();
+      if (!url || !key) throw new Error("Project URL and publishable key are required.");
+      return window.supabase.createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+    }
+
+    function selectedFile() {
+      const file = document.getElementById("file").files[0];
+      if (!file) throw new Error("Choose the harmless validation file first.");
+      return file;
+    }
+
+    function testPath(file) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+      return `inc-006-client-test-${Date.now()}-${safeName}`;
+    }
+
+    async function upload(mode) {
+      try {
+        const supabase = client();
+        const file = selectedFile();
+        if (mode === "anonymous") {
+          await supabase.auth.signOut();
+        } else {
+          const email = document.getElementById("email").value.trim();
+          const password = document.getElementById("password").value;
+          if (!email || !password) throw new Error("Email and password are required for the authenticated test.");
+          const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+          if (signInError) throw new Error(`Sign-in failed: ${signInError.message}`);
+        }
+
+        const path = testPath(file);
+        const { data, error } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: false });
+        if (error) {
+          status(`${mode} upload result: FAILED (expected for anonymous test)\n` +
+            `Message: ${error.message}\nStatus: ${error.statusCode || "not returned"}\nPath: ${path}`);
+          return;
+        }
+        status(`${mode} upload result: SUCCEEDED\n` +
+          `Object path: ${data.path}\n` +
+          `This created an object in the hosted bucket; record the result and do not repeat unnecessarily.`);
+      } catch (error) {
+        status(`${mode} upload could not be completed:\n${error.message}`);
+      }
+    }
+
+    document.getElementById("signIn").onclick = async () => {
+      try {
+        const supabase = client();
+        const email = document.getElementById("email").value.trim();
+        const password = document.getElementById("password").value;
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        status(`Signed in as authenticated test user.\nUser ID: ${data.user.id}\nNo token was displayed.`);
+      } catch (error) {
+        status(`Sign-in failed: ${error.message}`);
+      }
+    };
+
+    document.getElementById("anonymousUpload").onclick = () => upload("anonymous");
+    document.getElementById("authenticatedUpload").onclick = () => upload("authenticated");
+    document.getElementById("signOut").onclick = async () => {
+      try {
+        const supabase = client();
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
+        status("Signed out. The next upload will run without an Auth session.");
+      } catch (error) {
+        status(`Sign-out failed: ${error.message}`);
+      }
+    };
+  </script>
+</body>
+</html>

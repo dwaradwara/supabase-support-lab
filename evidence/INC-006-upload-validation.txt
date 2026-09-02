@@ -1,0 +1,2 @@
+INC-006 harmless upload validation artifact.
+Created for Supabase Storage policy testing only.
